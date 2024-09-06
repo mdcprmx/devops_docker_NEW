@@ -335,89 +335,98 @@
 >   - **error bind: address already in use**
 >      - То надо через команду 
 >        - **sudo lsof -i -P -n** 
->        - Найти процесс который юзает этот порт (в моём случае это был apache2) и выключить его по PID командой **sudo kill [ ID ]**
+>        - Найти процесс который юзает этот порт (в моём случае это был apache2) и выключить его по PID командой:
+>           - **sudo kill %ID%**
 
-> - Также где-то в этой части была трабла из-за того что надо запускать контейнер с портами 81:81
->   - Тоесть командой:
->        - **sudo docker run -d -p 81:81 repo_name:repo_tag** 
-> - И ещё, **!ВАЖНО!** лучше пробовать зайти на сайт через curl:
->   - **curl localhost:81**
->   - Или же постоянно чистить **cache** в браузере, так как браузер запоминает страничку и грузит её из кэша
 ---
 
-##### Желательно создать новый контейнер
+##### Для начала, желательно создать новый контейнер
 - Через команду:
-    - **sudo docker run --name my_name -d -p 81:81 nginx:latest**
-    ![](./pics/2024sept_pic4.png)
+    - **sudo docker run --name p3_docker -d -p 81:81 nginx:latest**
+    - Почему порты 81:81? Так сказано по заданию.
+    - ![](./pics/2024sept_pic27.png)
 
 
 ##### Напиши мини-сервер на **C** и **FastCgi** который будет возвращать простейшую страничку с надписью `Hello World!`.
 
 - Создаю файлик на языке **си** \
-    ![](./pics/2024sept_pic5.png)
+    - ![](./pics/2024sept_pic28.png)
+    - название произвольное, но я назвал:
+        - **p3_server_src.c**
 
 - Копирую его на **контейнер** 
-    - **sudo docker cp p3server.c ###:/etc/nginx/p3server.c**  \
-    ![](./pics/2024sept_pic10.png)
+    - **sudo docker cp p3_server_src.c p3_docker:/etc/nginx/**  \
+    - ![](./pics/2024sept_pic30.png)
 
 ---
 
 - Далее заходим в терминал внутри докера, через:
-    - **docker exec -it ### sh**
-        - **-it** interactive, без этого флага терминал будет неИнтерактивен 
-    - Обновляю список приложух через **apt-get update**
+    - **docker exec -it p3_docker sh**
+    - ![](./pics/2024sept_pic31.png)
+        - **-it** interactive, без этого флага терминал будет неИнтерактивен
+
+    - Обновляю список приложений,
     - И скачиваю нужные библиотеки для поднятия мини-сервера
         - **apt-get update**
         - **apt-get install libfcgi-dev -y**
         - **apt-get install spawn-fcgi -y**
         - **apt-get install gcc -y**
-        - **apt-get install php-fpm -y**
-    ![](./pics/2024sept_pic9.png)
+        - ![](./pics/2024sept_pic32.png)
 
 ---
-
-- Далее нахожу скопированный **си** файл в папке **etc** \
-- Компилирую его и запускаю для теста \
-![](./pics/2024sept_pic11.png)
-
 
 ##### Запускаю написанный мини-сервер через *spawn-fcgi* на порту 8080.
 
-- Захожу в интерактивный режи на докер:
-    - **sudo docker exec -it ### sh**
-
-- И прожимаю:
-    - **sudo spawn-fcgi -p 8080 a.out** \
-    ![](./pics/q48.png)
+- Также находясь в интерактивном режиме sh внутри docker'a
+- Прожимаю:
+    - **cd /etc/nginx**
+    - **gcc p3_server_src.c -lfcgi -o server.o**
+    - **spawn-fcgi -p 8080 server.out** \
+    - ![](./pics/2024sept_pic33.png)
 
 ---
 ##### Пишу свой *nginx.conf*, который будет проксировать все запросы с 81 порта на *127.0.0.1:8080*.
-- Будучи в интерактивном режиме **sh** внутри контейнера, меняю **nginx.conf** на: \
-    - Тут получается в папке **/etc/nginx/conf.d** файл **default.conf** был удалён (переименован в BCKP) \
-    ![](./pics/q50.png)
-    - Имеется только один конфиг **nginx.conf** лежащий по пути **/etc/nginx/nginx.conf**
-    - И вот его внутренности: \
-    ![](./pics/q51.png) 
-    - По сути добавляется лишь этот код:
-        > listen 81; \
-        > location / { \
-        >   fastcgi_pass 127.0.0.1:8080; \
-        > }
+
+- Придётся выйти из интерактивного режима через:
+    - **exit**
+    - ![](./pics/2024sept_pic34.png)
+---
+- И добавить в **nginx.conf**:
+    > listen 81; \
+    > location / { \
+    >   fastcgi_pass 127.0.0.1:8080; \
+    > }
+---
+- Итоговый nginx.conf выглядит так:
+    - ![](./pics/2024sept_pic35.png)
+
+- Дальше его надо скопировать внутрь контейнера:
+    - **docker cp nginx.conf p3_docker:/etc/nginx**
+    - ![](./pics/2024sept_pic36.png)
+---
+
+- Ну и перезапустить всё это дело:
+    - Можно через 
+        - **docker exec p3_docker spawn-fcgi -p 8080 /etc/nginx/server.o**
+        - **docker exec p3_server nginx -s reload**
+    - А можно зайти внутрь контейнера и прожать там:
+        - **docker exec -it p3_docker sh**
+        - **spawn-fcgi -p 8080 /etc/nginx/server.o**
+        - **nginx -s reload**
+    - ![](./pics/2024sept_pic37.png)
+
 
 ---
 ##### Проверь, что в браузере по *localhost:81* отдается написанная тобой страничка.
-- Получается нужно зайти в **sh** на контейнер и прожать:
-    - **gcc p3_mini_server.c -lfcgi -o p3_server** (названия соответсвенно менять надо в соответсвии с названиями)
-    - **spawn-fcgi -p 8080 ./p3_server**
-    - **nginx -s reload**
 
-- Захожу на ВМ-ке через браузер на
-    - **localhost:81** \
-    ![](./pics/q49.png)
+- Захожу на ВМ-ке через браузер на **localhost:81** \
+    - ![](./pics/2024sept_pic38.png)
+- Альтернативно можно через curl:
+    - **curl localhost:81**
+    - ![](./pics/2024sept_pic39.png)
 
 ##### Положи файл *nginx.conf* по пути *./nginx/nginx.conf* (это понадобится позже).
-- Положил \
-![](./pics/q53.png)
+- Положил 
 
 <a id="part-4"></a>
 ## Part 4. Свой докер
